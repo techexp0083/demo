@@ -17,10 +17,10 @@ if __name__ == "__main__":
 
     # 攻撃ノード
     attack_nodes = [
-        Process(target=run_attack_node, args=(4, 5003, peers, tampered_data)),
-        Process(target=run_attack_node, args=(5, 5004, peers, tampered_data)),
-        Process(target=run_attack_node, args=(6, 5005, peers, tampered_data)),
-        Process(target=run_attack_node, args=(7, 5006, peers, tampered_data)),
+        Process(target=run_attack_node, args=(4, 5003, peers, tampered_data, True)),
+        Process(target=run_attack_node, args=(5, 5004, peers, tampered_data, False)),
+        Process(target=run_attack_node, args=(6, 5005, peers, tampered_data, False)),
+        Process(target=run_attack_node, args=(7, 5006, peers, tampered_data, False)),
     ]
 
     # 正常ノードの開始

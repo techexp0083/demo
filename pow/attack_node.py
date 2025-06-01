@@ -32,12 +32,14 @@ class Block:
         }
 
 class AttackNode:
-    def __init__(self, node_id, port, tampered_data):
+    def __init__(self, node_id, port, tampered_data, is_leader=False):
         self.node_id = node_id
         self.port = port
         self.chain = [self.create_genesis_block()]
         self.peers = []
         self.tampered_data = tampered_data
+        self.shared_hash = None  # 共有するハッシュ
+        self.is_leader = is_leader  # リーダーノードかどうか
 
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.bind(("0.0.0.0", port))
@@ -64,6 +66,8 @@ class AttackNode:
             self.handle_new_block(request)
         elif request.startswith("GET_CHAIN"):
             self.send_chain(client_socket)
+        elif request.startswith("SHARED_HASH"):
+            self.shared_hash = request.split(":")[1]  # 共有されたハッシュを設定
         client_socket.close()
 
     def handle_new_block(self, request):
@@ -105,29 +109,46 @@ class AttackNode:
             client_handler.start()
 
     def mine_block(self, data):
-        self.sync_chain()  # マイニング前にチェーンを同期
-        previous_block = self.chain[-1]
-        index = previous_block.index + 1
-        timestamp = time.time()
-        nonce = 0
+        if self.is_leader:
+            self.sync_chain()  # マイニング前にチェーンを同期
+            previous_block = self.chain[-1]
+            index = previous_block.index + 1
+            timestamp = time.time()
+            nonce = 0
 
-        start_time = time.time()  # マイニング開始時刻
-        while True:
-            new_block = Block(index, previous_block.hash, timestamp, data, nonce)
-            if new_block.hash.startswith("0000"):  # 難易度を調整
-                break
-            nonce += 1
-        end_time = time.time()  # マイニング終了時刻
+            start_time = time.time()  # マイニング開始時刻
+            while True:
+                new_block = Block(index, previous_block.hash, timestamp, data, nonce)
+                if new_block.hash.startswith("0000"):  # 難易度を調整
+                    break
+                nonce += 1
+            end_time = time.time()  # マイニング終了時刻
 
-        # 攻撃ノードは無効なブロックを生成
-        new_block.data = self.tampered_data
-        new_block.hash = new_block.calculate_hash()
+            # 攻撃ノードは無効なブロックを生成
+            new_block.data = self.tampered_data
+            new_block.hash = new_block.calculate_hash()
 
-        self.chain.append(new_block)
-        logging.info(f"Block mined: {new_block.hash} in {end_time - start_time} seconds")
-        self.broadcast_new_block(new_block)
-        time.sleep(5)  # 5秒待機
-        self.print_blockchain()  # ブロックチェーンの状態を出力
+            # 共有するハッシュを設定
+            self.shared_hash = new_block.hash
+
+            self.chain.append(new_block)
+            logging.info(f"Block mined: {new_block.hash} in {end_time - start_time} seconds")
+            self.broadcast_new_block(new_block)
+            self.broadcast_shared_hash(new_block.hash)  # ハッシュをブロードキャスト
+            time.sleep(5)  # 5秒待機
+            self.print_blockchain()  # ブロックチェーンの状態を出力
+        else:
+            # リーダーノードから共有されたハッシュを使用してブロックを生成
+            if self.shared_hash:
+                previous_block = self.chain[-1]
+                index = previous_block.index + 1
+                timestamp = time.time()
+                nonce = 0
+
+                new_block = Block(index, previous_block.hash, timestamp, data, nonce, self.shared_hash)
+                self.chain.append(new_block)
+                logging.info(f"Block added using shared hash: {new_block.hash}")
+                self.print_blockchain()
 
     def broadcast_new_block(self, new_block):
         for peer in self.peers:
@@ -135,7 +156,7 @@ class AttackNode:
             retry_count = 0
             while retry_count < 5:
                 try:
-                    client.connect((peer[0], peer[1]))  # 修正: peerをタプル形式で渡す
+                    client.connect((peer[0], peer[1]))
                     message = f"NEW_BLOCK:{new_block.index}:{new_block.previous_hash}:{new_block.timestamp}:{new_block.data}:{new_block.nonce}:{new_block.hash}"
                     client.send(message.encode('utf-8'))
                     client.close()
@@ -145,6 +166,29 @@ class AttackNode:
                     logging.warning(f"Connection refused to {peer}. Retrying...")
                     retry_count += 1
                     time.sleep(1)  # 1秒待機して再試行
+                except Exception as e:
+                    logging.error(f"Error broadcasting new block to {peer}: {e}")
+                    break
+
+    def broadcast_shared_hash(self, hash_value):
+        for peer in self.peers:
+            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            retry_count = 0
+            while retry_count < 5:
+                try:
+                    client.connect((peer[0], peer[1]))
+                    message = f"SHARED_HASH:{hash_value}"
+                    client.send(message.encode('utf-8'))
+                    client.close()
+                    logging.info(f"Broadcasted shared hash to {peer}")
+                    break
+                except ConnectionRefusedError:
+                    logging.warning(f"Connection refused to {peer}. Retrying...")
+                    retry_count += 1
+                    time.sleep(1)  # 1秒待機して再試行
+                except Exception as e:
+                    logging.error(f"Error broadcasting shared hash to {peer}: {e}")
+                    break
 
     def send_chain(self, client_socket):
         chain_data = [block.to_dict() for block in self.chain]
@@ -155,7 +199,7 @@ class AttackNode:
         for peer in self.peers:
             client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                client.connect((peer[0], peer[1]))  # 修正: peerをタプル形式で渡す
+                client.connect((peer[0], peer[1]))
                 client.send("GET_CHAIN".encode('utf-8'))
                 response = client.recv(4096).decode('utf-8')
                 peer_chain = json.loads(response)
@@ -165,6 +209,8 @@ class AttackNode:
                 client.close()
             except ConnectionRefusedError:
                 logging.warning(f"Connection refused to {peer}. Skipping...")
+            except Exception as e:
+                logging.error(f"Error syncing chain with {peer}: {e}")
         self.chain = longest_chain
         logging.info("Blockchain updated with the latest valid chain from peers.")
         self.print_blockchain()
@@ -182,8 +228,8 @@ class AttackNode:
         for block in self.chain:
             logging.info(f"Index: {block.index}, Hash: {block.hash}, Previous Hash: {block.previous_hash}, Data: {block.data}")
 
-def run_attack_node(node_id, port, peers, tampered_data):
-    node = AttackNode(node_id=node_id, port=port, tampered_data=tampered_data)
+def run_attack_node(node_id, port, peers, tampered_data, is_leader=False):
+    node = AttackNode(node_id=node_id, port=port, tampered_data=tampered_data, is_leader=is_leader)
     for peer in peers:
         node.add_peer(peer)
     server_thread = threading.Thread(target=node.start_server)
