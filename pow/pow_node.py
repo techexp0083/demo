@@ -130,7 +130,7 @@ class Node:
             retry_count = 0
             while retry_count < 5:
                 try:
-                    client.connect(peer)
+                    client.connect((peer[0], peer[1]))  # 修正: peerをタプル形式で渡す
                     message = f"NEW_BLOCK:{new_block.index}:{new_block.previous_hash}:{new_block.timestamp}:{new_block.data}:{new_block.nonce}:{new_block.hash}"
                     client.send(message.encode('utf-8'))
                     client.close()
@@ -150,7 +150,7 @@ class Node:
         for peer in self.peers:
             client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                client.connect(peer)
+                client.connect((peer[0], peer[1]))  # 修正: peerをタプル形式で渡す
                 client.send("GET_CHAIN".encode('utf-8'))
                 response = client.recv(4096).decode('utf-8')
                 peer_chain = json.loads(response)
