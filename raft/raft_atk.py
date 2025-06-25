@@ -26,7 +26,7 @@ class Node:
         print(f"Node {self.node_id} stopped.")
 
     def leader_activity(self):
-        choice = random.randrange(0,3)
+        choice = random.randrange(0,2)
         if choice == 0:
             print(f"Node {self.node_id} failed to send heartbeat")
         else:
@@ -34,6 +34,8 @@ class Node:
 
     def follower_activity(self):
         # HertBeatの喪失検出処理
+        if self.node_id == 0:
+            print(f"Node {self.node_id} hasn't touched {self.leader_missing} cycles.")
         self.leader_missing += 1
         if self.leader_missing > 2:
             print(f"Node {self.node_id} lost the leader")
@@ -68,21 +70,17 @@ class Node:
             print(f"Node {self.node_id} failed to become the leader with term {self.term}")
 
     def request_vote(self, term, candidate_id):
-        # TODO: 本来、自身よりログが短い相手からの投票依頼は棄却する必要がある。
         if term > self.term :
-            # 未投票のタームに進んだ場合
             self.term = term
             self.voted_for = candidate_id
             print(f"Node {self.node_id} voted for {candidate_id} in term {term}")
             self.leader_missing = 0
             return (True , self.term)
         elif term == self.term and self.voted_for == candidate_id:
-            # すでに投票済みのタームで、投票済みの相手から再度投票依頼を受けた場合
             self.voted_for = candidate_id
             print(f"Node {self.node_id} re-voted for {candidate_id} in term {term}")
             self.leader_missing = 0
             return (True , self.term)
-        # すでに投票済みかつ、別の相手からの投票依頼
         print(f"Node {self.node_id} rejected vote request from {candidate_id} in term {term}")
         return (False, self.term)
 
@@ -104,12 +102,20 @@ class Node:
         print(f"Node {self.node_id} rejected entries from leader {leader_id} in term {term}")
         return False
 
-def simulate_normal_scenario():
+class AttackNode(Node):
+    def follower_activity(self):
+        print(f"Node {self.node_id} executing usurpation!!!")
+        self.start_election()
+
+
+def simulate_attack_scenario():
     nodes = [Node(i, []) for i in range(5)]
     threds = []
+    nodes[4] = AttackNode(4, [])
     for node in nodes:
         node.nodes = nodes
         threds.append(threading.Thread(target=node.main_loop))
+
 
     try :
         for thred in threds:
@@ -124,7 +130,6 @@ def simulate_normal_scenario():
         for thread in threds:
             thread.join(timeout = 2)
         raise
-
 if __name__ == "__main__":
-    print("Simulating normal scenario:")
-    simulate_normal_scenario()
+    print("Simulating attack scenario:")
+    simulate_attack_scenario()
